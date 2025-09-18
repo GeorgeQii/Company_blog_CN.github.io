@@ -23,9 +23,9 @@ jobs:
 
       - name: Get config.json
         run: |
-          echo "====== check config.josn file ======"
+          echo "====== check config.json file ======"
           cat config.json
-          echo "====== check config.josn end  ======"
+          echo "====== check config.json end  ======"
           sudo apt-get install jq
 
       - name: Set up Python
@@ -46,21 +46,34 @@ jobs:
           pip install --upgrade pip
           pip install -r /opt/Gmeek/requirements.txt
 
-      - name: Generate new html
+      - name: Generate new html (keep custom blogBase.json)
         run: |
+          # 关键修改：仅复制非 blogBase.json 的文件到 Gmeek 目录，避免覆盖自定义配置
           cp -r ./* /opt/Gmeek/
+          rm -f /opt/Gmeek/blogBase.json  # 删除从仓库复制过来的默认 blogBase.json（若存在）
+          # 若本地仓库有自定义 blogBase.json，复制到 Gmeek 目录；若无，用 Gmeek 源码的初始化文件（首次运行兼容）
+          if [ -f "./blogBase.json" ]; then
+            cp ./blogBase.json /opt/Gmeek/blogBase.json
+          else
+            cp /opt/Gmeek/blogBase.json.example /opt/Gmeek/blogBase.json  # 假设 Gmeek 有示例文件，无则删此句
+          fi
+          
+          # 正常执行 Gmeek 生成逻辑（不变）
           cd /opt/Gmeek/
           python Gmeek.py ${{ secrets.GITHUB_TOKEN }} ${{ github.repository }} --issue_number '${{ github.event.issue.number }}'
+          
+          # 关键修改：仅回传生成的 docs/backup，不回传 Gmeek 源码的 blogBase.json（避免覆盖本地自定义文件）
           cp -a /opt/Gmeek/docs ${{ github.workspace }} 
           cp -a /opt/Gmeek/backup ${{ github.workspace }} 
-          cp /opt/Gmeek/blogBase.json ${{ github.workspace }} 
+          # 移除这行：cp /opt/Gmeek/blogBase.json ${{ github.workspace }}  # 彻底删除覆盖本地 blogBase.json 的操作
           
-      - name: update html
+      - name: Update html and commit (no blogBase.json overwrite)
         run: |
           git config --local user.email "$(jq -r ".email" config.json)"
           git config --local user.name "${{ github.repository_owner }}"
-          git add .
-          git commit -a -m '🎉auto update by Gmeek action' || echo "nothing to commit"
+          # 关键修改：仅添加 docs/ 和 backup/ 目录（生成的内容），不添加 blogBase.json（避免 Action 误提交覆盖）
+          git add docs/ backup/
+          git commit -m '🎉auto update by Gmeek action' || echo "nothing to commit"
           git push || echo "nothing to push"
           sleep 3
           
